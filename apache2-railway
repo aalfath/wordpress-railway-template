@@ -1,0 +1,43 @@
+#!/bin/bash
+# Installs WordPress on first boot (so the install wizard is never public),
+# then starts Apache. The name starts with "apache2" on purpose: the official
+# entrypoint only sets up WordPress for commands named apache2*.
+set -euo pipefail
+cd /var/www/html
+
+# Run WP-CLI as www-data, so files it creates (uploads/) stay writable by Apache.
+wpcli() { runuser -u www-data -- wp --path=/var/www/html "$@"; }
+
+# Wait for the database (up to 3 minutes). If it never answers, exit so Railway
+# restarts the service, rather than serving an uninstalled site.
+db_ready() {
+  php -r '
+    $h = getenv("WORDPRESS_DB_HOST") ?: "mysql"; $p = 3306;
+    if (preg_match("/^(.*):(\d+)$/", $h, $m)) { $h = $m[1]; $p = (int)$m[2]; }
+    mysqli_report(MYSQLI_REPORT_OFF);
+    $c = @mysqli_connect($h, getenv("WORDPRESS_DB_USER") ?: "root", getenv("WORDPRESS_DB_PASSWORD") ?: "", getenv("WORDPRESS_DB_NAME") ?: "wordpress", $p);
+    exit($c ? 0 : 1);'
+}
+for i in $(seq 1 90); do
+  db_ready && break
+  if [ "$i" = 90 ]; then echo >&2 "Database not reachable after 3 minutes; exiting so Railway restarts the service."; exit 1; fi
+  echo >&2 "Waiting for the database ($i)..."
+  sleep 2
+done
+
+if ! wpcli core is-installed 2>/dev/null; then
+  if [ -z "${WP_ADMIN_EMAIL:-}" ] || [ -z "${WP_ADMIN_PASSWORD:-}" ]; then
+    echo >&2 "WordPress is not installed and WP_ADMIN_EMAIL or WP_ADMIN_PASSWORD is empty. Set both, then redeploy."
+    exit 1
+  fi
+  if [ -n "${WP_SITE_URL:-}" ]; then url="$WP_SITE_URL"
+  elif [ -n "${RAILWAY_PUBLIC_DOMAIN:-}" ]; then url="https://${RAILWAY_PUBLIC_DOMAIN}"
+  else url="http://localhost:${PORT:-80}"; fi
+  echo >&2 "Installing WordPress at $url (admin user: ${WP_ADMIN_USER:-admin})..."
+  wpcli core install --url="$url" --title="${WP_SITE_TITLE:-My WordPress Site}" \
+    --admin_user="${WP_ADMIN_USER:-admin}" --admin_password="$WP_ADMIN_PASSWORD" \
+    --admin_email="$WP_ADMIN_EMAIL" --skip-email
+  wpcli rewrite structure '/%postname%/' >/dev/null || true
+fi
+
+exec apache2-foreground
