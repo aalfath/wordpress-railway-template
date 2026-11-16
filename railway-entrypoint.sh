@@ -2,6 +2,11 @@
 # Runs before the official entrypoint: Apache port, PHP limits, wp-content ownership.
 set -euo pipefail
 
+# Railway's image builder can bring back the mpm_event link the base image removed
+# ("AH00534: More than one MPM loaded"). mod_php needs prefork, so keep only that.
+rm -f /etc/apache2/mods-enabled/mpm_event.* /etc/apache2/mods-enabled/mpm_worker.*
+[ -e /etc/apache2/mods-enabled/mpm_prefork.load ] || a2enmod -q mpm_prefork
+
 # Listen on Railway's PORT (80 when unset).
 PORT="${PORT:-80}"
 sed -ri "s/^Listen [0-9]+$/Listen ${PORT}/" /etc/apache2/ports.conf
