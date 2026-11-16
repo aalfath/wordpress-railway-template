@@ -1,5 +1,7 @@
 # WordPress on Railway
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/wordpress-5?utm_medium=integration&utm_source=button&utm_campaign=wordpress)
+
 A Railway template for [WordPress](https://wordpress.org/) 7.1.4, built from this repo.
 
 ## What it deploys
